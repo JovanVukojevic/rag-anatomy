@@ -10,8 +10,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.15",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
 ]
@@ -40,6 +42,43 @@ enable_error_code = ["ignore-without-code"]
 minversion = "9.0"
 testpaths = ["tests"]
 strict = true
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.importlinter]
+root_package = "rag_anatomy"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Dependencies point inward"
+type = "layers"
+layers = [
+    "rag_anatomy.adapters",
+    "rag_anatomy.services",
+    "rag_anatomy.ports",
+    "rag_anatomy.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Driving and driven adapters meet only through the core"
+type = "independence"
+modules = ["rag_anatomy.adapters.driving", "rag_anatomy.adapters.driven"]
+
+[[tool.importlinter.contracts]]
+name = "The core imports no SDKs"
+type = "forbidden"
+source_modules = ["rag_anatomy.domain", "rag_anatomy.ports", "rag_anatomy.services"]
+forbidden_modules = [
+    "openai",
+    "psycopg",
+    "psycopg_pool",
+    "pgvector",
+    "fastapi",
+    "starlette",
+    "httpx",
+    "pydantic",
+    "pypdf",
+]
 
 [tool.coverage.run]
 source_pkgs = ["rag_anatomy"]
