@@ -10,3 +10,12 @@ same harness, so every design decision is backed by numbers.
 **Status:** work in progress. Nothing is usable yet.
 
 **Stack:** Python 3.14, FastAPI, Postgres + pgvector, OpenAI.
+
+## Development
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+```sh
+uv sync
+make check
+```
