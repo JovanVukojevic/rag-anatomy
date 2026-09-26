@@ -7,6 +7,11 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
+    "alembic>=1.20.0",
+    "pgvector>=0.5.0",
+    "psycopg[binary,pool]>=3.3.6",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.1.1",
     "tiktoken>=0.14.0",
 ]
 
@@ -18,6 +23,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
+    "testcontainers>=4.15.0",
 ]
 
 [build-system]
@@ -26,6 +32,9 @@ build-backend = "uv_build"
 
 [tool.uv]
 required-version = "==0.9.26"
+
+[tool.alembic]
+script_location = "rag_anatomy.adapters.driven.postgres:migrations"
 
 [tool.ruff.lint]
 select = ["F", "E4", "E7", "E9", "I", "UP", "B", "RUF", "TID", "ERA"]
@@ -39,6 +48,7 @@ strict = true
 files = ["src", "tests"]
 warn_unreachable = true
 enable_error_code = ["ignore-without-code"]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest]
 minversion = "9.0"
@@ -46,6 +56,7 @@ testpaths = ["tests"]
 strict = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["integration: needs Docker (testcontainers)"]
 
 [tool.importlinter]
 root_package = "rag_anatomy"
@@ -79,6 +90,11 @@ forbidden_modules = [
     "starlette",
     "httpx",
     "pydantic",
+    "pydantic_settings",
+    "dotenv",
+    "alembic",
+    "sqlalchemy",
+    "testcontainers",
     "pypdf",
     "tiktoken",
 ]

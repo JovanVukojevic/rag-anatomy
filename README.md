@@ -13,9 +13,12 @@ same harness, so every design decision is backed by numbers.
 
 ## Development
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/) and Docker.
 
 ```sh
 uv sync
-make check
+cp .env.example .env
+make db-up migrate
+make check        # includes integration tests against a throwaway Postgres
+make test-unit    # fast loop, no Docker
 ```

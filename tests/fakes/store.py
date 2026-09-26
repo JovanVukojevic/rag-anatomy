@@ -36,9 +36,9 @@ class InMemoryStore:
         )
 
     async def find_by_filename(self, filename: str) -> Document | None:
-        key = filename.casefold()
+        key = filename.lower()
         return next(
-            (d for d in self._documents.values() if d.filename.casefold() == key),
+            (d for d in self._documents.values() if d.filename.lower() == key),
             None,
         )
 
@@ -82,7 +82,7 @@ class InMemoryStore:
             if existing.content_hash == document.content_hash:
                 raise DuplicateContentError(existing)
         for existing in others:
-            if existing.filename.casefold() == document.filename.casefold():
+            if existing.filename.lower() == document.filename.lower():
                 raise FilenameConflictError(existing)
 
     def _insert(
