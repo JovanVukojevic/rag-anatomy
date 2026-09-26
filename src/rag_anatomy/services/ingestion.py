@@ -109,9 +109,13 @@ class IngestionService:
             async with semaphore:
                 results[index] = await self._embedder.embed_documents(batch)
 
-        async with asyncio.TaskGroup() as group:
-            for index, batch in enumerate(batches):
-                group.create_task(embed(index, batch))
+        try:
+            async with asyncio.TaskGroup() as group:
+                for index, batch in enumerate(batches):
+                    group.create_task(embed(index, batch))
+        except ExceptionGroup as eg:
+            # The first recorded failure is the one that cancelled the other batches (D41).
+            raise eg.exceptions[0] from eg
         return [embedding for batch in results for embedding in batch]
 
 

@@ -19,6 +19,11 @@ async def test_byte_order_mark_is_stripped() -> None:
     assert pages == [Page(number=1, text="hello")]
 
 
+async def test_text_is_normalized() -> None:
+    pages = await TextParser().parse(b"one\r\ntwo\rthree\x00", "text/plain")
+    assert pages == [Page(number=1, text="one\ntwo\nthree")]
+
+
 async def test_invalid_utf8_is_rejected() -> None:
     with pytest.raises(InvalidEncodingError):
         await TextParser().parse("café".encode("latin-1"), "text/plain")

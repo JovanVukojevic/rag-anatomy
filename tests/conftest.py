@@ -2,9 +2,11 @@ import re
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
+import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from psycopg import sql
 from testcontainers.community.postgres import PostgresContainer
 
 from rag_anatomy.adapters.driven.postgres import PgVectorStore, connection_pool
@@ -37,14 +39,23 @@ def database() -> Iterator[DatabaseSettings]:
         command.upgrade(migrations, "head")
         command.downgrade(migrations, "base")
         command.upgrade(migrations, "head")
-        yield DatabaseSettings()
+        settings = DatabaseSettings()
+        # Tiny test tables would be seq-scanned, leaving HNSW behaviour (ef_search,
+        # dead tuples, iterative scans, tie order) untested.
+        with psycopg.connect(settings.dsn, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("ALTER DATABASE {} SET enable_seqscan = off").format(
+                    sql.Identifier(settings.db)
+                )
+            )
+        yield settings
 
 
 @pytest.fixture
 async def pg_pool(database: DatabaseSettings) -> AsyncIterator[Pool]:
     async with connection_pool(database.dsn, max_size=4, timeout=10) as pool:
         async with pool.connection() as conn:
-            await conn.execute("TRUNCATE documents CASCADE")
+            await conn.execute("TRUNCATE documents, embedding_space CASCADE")
         yield pool
 
 

@@ -1,6 +1,7 @@
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pgvector import Vector
@@ -16,19 +17,28 @@ from rag_anatomy.domain import (
     Embedding,
     FilenameConflictError,
     RetrievedChunk,
-    Retriever,
+    StageRank,
 )
 from rag_anatomy.ports import DocumentRepository, KeywordSearch, VectorSearch
 
 EMBEDDING_DIMENSIONS = 1536
+MIN_PGVECTOR_VERSION = (0, 8, 0)
+MAX_SEARCH_K = 1000
 
 type Pool = AsyncConnectionPool[AsyncConnection[TupleRow]]
 
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EmbeddingSpace:
+    model: str
+    dimensions: int
+
+
 _DEFAULT_EF_SEARCH = 40
-_MAX_EF_SEARCH = 1000
 _INSERT_ATTEMPTS = 3
 
 _DOCUMENT_COLUMNS = "id, filename, media_type, content_hash, created_at"
+
 _FIND_BY_HASH = f"SELECT {_DOCUMENT_COLUMNS} FROM documents WHERE content_hash = %s"
 _FIND_BY_FILENAME = (
     f"SELECT {_DOCUMENT_COLUMNS} FROM documents WHERE lower(filename) = lower(%s)"
@@ -44,17 +54,38 @@ _COPY_CHUNKS = """
     FROM STDIN (FORMAT BINARY)
 """
 _CHUNK_TYPES = ["uuid", "uuid", "int4", "text", "int4", "int4", "vector"]
+_EMBEDDING_COLUMN_DIMENSIONS = """
+    SELECT atttypmod FROM pg_attribute
+    WHERE attrelid = 'chunks'::regclass AND attname = 'embedding' AND NOT attisdropped
+"""
+# SHARE blocks chunk inserts until commit, so no chunk can be written under the old
+# space between the emptiness check and the update.
+_LOCK_CHUNKS = "LOCK TABLE chunks IN SHARE MODE"
+_CLAIM_EMBEDDING_SPACE = """
+    INSERT INTO embedding_space (model, dimensions) VALUES (%s, %s)
+    ON CONFLICT (singleton) DO UPDATE
+        SET model = EXCLUDED.model, dimensions = EXCLUDED.dimensions
+        WHERE NOT EXISTS (SELECT FROM chunks)
+"""
+_EMBEDDING_SPACE = "SELECT model, dimensions FROM embedding_space"
+_PGVECTOR_VERSION = "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+
+SEARCH_SETTINGS_SQL = """
+    SELECT set_config('hnsw.ef_search', %(ef_search)s, true),
+           set_config('hnsw.iterative_scan', 'strict_order', true)
+"""
 
 VECTOR_SEARCH_SQL = """
     WITH nearest AS (
         SELECT id, document_id, text, position, page_start, page_end,
                embedding <=> %(embedding)s AS distance
         FROM chunks
-        ORDER BY embedding <=> %(embedding)s
+        ORDER BY embedding <=> %(embedding)s, id
         LIMIT %(k)s
     )
-    SELECT n.id, n.document_id, n.text, n.position, n.page_start, n.page_end,
-           d.filename, 1 - n.distance
+    SELECT n.id, n.text, n.position, n.page_start, n.page_end,
+           d.id, d.filename, d.media_type, d.content_hash, d.created_at,
+           1 - n.distance
     FROM nearest n
     JOIN documents d ON d.id = n.document_id
     ORDER BY n.distance, n.id
@@ -66,8 +97,9 @@ KEYWORD_SEARCH_SQL = """
             plainto_tsquery('simple_unaccent', %(query)s)::text, ' & ', ' | '
         )::tsquery AS query
     )
-    SELECT c.id, c.document_id, c.text, c.position, c.page_start, c.page_end,
-           d.filename, ts_rank(c.tsv, q.query) AS score
+    SELECT c.id, c.text, c.position, c.page_start, c.page_end,
+           d.id, d.filename, d.media_type, d.content_hash, d.created_at,
+           ts_rank(c.tsv, q.query) AS score
     FROM q
     JOIN chunks c ON c.tsv @@ q.query
     JOIN documents d ON d.id = c.document_id
@@ -95,6 +127,38 @@ def connection_pool(conninfo: str, *, max_size: int, timeout: float) -> Pool:
 class PgVectorStore:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
+
+    async def embedding_column_dimensions(self) -> int:
+        async with self._pool.connection() as conn:
+            cursor = await conn.execute(_EMBEDDING_COLUMN_DIMENSIONS)
+            row = await cursor.fetchone()
+        if row is None:
+            raise LookupError("chunks.embedding does not exist; run the migrations")
+        dimensions: int = row[0]
+        return dimensions
+
+    async def claim_embedding_space(
+        self, model: str, dimensions: int
+    ) -> EmbeddingSpace:
+        async with self._pool.connection() as conn, conn.transaction():
+            await conn.execute(_LOCK_CHUNKS)
+            await conn.execute(_CLAIM_EMBEDDING_SPACE, (model, dimensions))
+            cursor = await conn.execute(_EMBEDDING_SPACE)
+            row = await cursor.fetchone()
+        if row is None:
+            raise LookupError("embedding_space is empty after claiming it")
+        return EmbeddingSpace(model=row[0], dimensions=row[1])
+
+    async def pgvector_version(self) -> tuple[int, ...]:
+        async with self._pool.connection() as conn:
+            cursor = await conn.execute(_PGVECTOR_VERSION)
+            row = await cursor.fetchone()
+        if row is None:
+            raise LookupError(
+                "the vector extension is not installed; run the migrations"
+            )
+        version: str = row[0]
+        return tuple(int(part) for part in version.split("."))
 
     async def find_by_hash(self, content_hash: str) -> Document | None:
         async with self._pool.connection() as conn:
@@ -129,23 +193,36 @@ class PgVectorStore:
             await _insert(conn, document, chunks, embeddings)
 
     async def vector_search(self, embedding: Embedding, k: int) -> list[RetrievedChunk]:
-        # HNSW returns at most ef_search rows, so a larger k would be cut short silently.
-        ef_search = min(max(k, _DEFAULT_EF_SEARCH), _MAX_EF_SEARCH)
+        if not 1 <= k <= MAX_SEARCH_K:
+            raise ValueError(f"k must be between 1 and {MAX_SEARCH_K}, got {k}")
+        # The first HNSW batch holds ef_search candidates, so ef_search >= k keeps the
+        # whole top k at full recall; iterative scans refill rows dropped as dead tuples.
+        ef_search = max(k, _DEFAULT_EF_SEARCH)
         async with self._pool.connection() as conn, conn.transaction():
-            await conn.execute(
-                "SELECT set_config('hnsw.ef_search', %s, true)", (str(ef_search),)
-            )
+            await conn.execute(SEARCH_SETTINGS_SQL, {"ef_search": str(ef_search)})
             cursor = await conn.execute(
                 VECTOR_SEARCH_SQL, {"embedding": Vector(embedding), "k": k}
             )
             rows = await cursor.fetchall()
-        return [_retrieved(row, Retriever.DENSE) for row in rows]
+        return [
+            RetrievedChunk(
+                chunk=chunk, document=document, dense=StageRank(rank=rank, score=score)
+            )
+            for rank, (chunk, document, score) in enumerate(map(_hit, rows), start=1)
+        ]
 
     async def keyword_search(self, query: str, k: int) -> list[RetrievedChunk]:
         async with self._pool.connection() as conn:
             cursor = await conn.execute(KEYWORD_SEARCH_SQL, {"query": query, "k": k})
             rows = await cursor.fetchall()
-        return [_retrieved(row, Retriever.KEYWORD) for row in rows]
+        return [
+            RetrievedChunk(
+                chunk=chunk,
+                document=document,
+                keyword=StageRank(rank=rank, score=score),
+            )
+            for rank, (chunk, document, score) in enumerate(map(_hit, rows), start=1)
+        ]
 
 
 def _check(
@@ -205,8 +282,10 @@ async def _find(
 ) -> Document | None:
     cursor = await conn.execute(query, (value,))
     row = await cursor.fetchone()
-    if row is None:
-        return None
+    return None if row is None else _document(row)
+
+
+def _document(row: Sequence[Any]) -> Document:
     id_, filename, media_type, content_hash, created_at = row
     return Document(
         id=id_,
@@ -217,21 +296,18 @@ async def _find(
     )
 
 
-def _retrieved(row: TupleRow, retriever: Retriever) -> RetrievedChunk:
-    id_, document_id, text, position, page_start, page_end, filename, score = row
-    return RetrievedChunk(
-        chunk=Chunk(
-            id=id_,
-            document_id=document_id,
-            text=text,
-            position=position,
-            page_start=page_start,
-            page_end=page_end,
-        ),
-        filename=filename,
-        score=score,
-        retriever=retriever,
+def _hit(row: TupleRow) -> tuple[Chunk, Document, float]:
+    id_, text, position, page_start, page_end, *document_columns, score = row
+    document = _document(document_columns)
+    chunk = Chunk(
+        id=id_,
+        document_id=document.id,
+        text=text,
+        position=position,
+        page_start=page_start,
+        page_end=page_end,
     )
+    return chunk, document, score
 
 
 if TYPE_CHECKING:

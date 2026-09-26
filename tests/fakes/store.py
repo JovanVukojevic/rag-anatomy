@@ -11,7 +11,7 @@ from rag_anatomy.domain import (
     Embedding,
     FilenameConflictError,
     RetrievedChunk,
-    Retriever,
+    StageRank,
 )
 from rag_anatomy.ports import DocumentRepository, KeywordSearch, VectorSearch
 from tests.fakes._text import overlap
@@ -21,7 +21,7 @@ from tests.fakes._text import overlap
 class _Entry:
     chunk: Chunk
     embedding: Embedding
-    filename: str
+    document: Document
 
 
 class InMemoryStore:
@@ -93,36 +93,53 @@ class InMemoryStore:
     ) -> None:
         self._documents[document.id] = document
         self._entries.extend(
-            _Entry(chunk, embedding, document.filename)
+            _Entry(chunk, embedding, document)
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         )
 
     async def vector_search(self, embedding: Embedding, k: int) -> list[RetrievedChunk]:
-        scored = [(_cosine(embedding, e.embedding), e) for e in self._entries]
-        return _top_k(scored, k, Retriever.DENSE)
+        by_distance = sorted(
+            (
+                (distance, e)
+                for e in self._entries
+                if (distance := _cosine_distance(embedding, e.embedding)) is not None
+            ),
+            key=lambda pair: (pair[0], pair[1].chunk.id),
+        )
+        return [
+            RetrievedChunk(
+                chunk=e.chunk,
+                document=e.document,
+                dense=StageRank(rank=rank, score=1 - distance),
+            )
+            for rank, (distance, e) in enumerate(by_distance[:k], start=1)
+        ]
 
     async def keyword_search(self, query: str, k: int) -> list[RetrievedChunk]:
-        scored = [(overlap(query, e.chunk.text), e) for e in self._entries]
-        return _top_k([(s, e) for s, e in scored if s > 0], k, Retriever.KEYWORD)
+        by_score = sorted(
+            (
+                (score, e)
+                for e in self._entries
+                if (score := overlap(query, e.chunk.text)) > 0
+            ),
+            key=lambda pair: (-pair[0], pair[1].chunk.id),
+        )
+        return [
+            RetrievedChunk(
+                chunk=e.chunk,
+                document=e.document,
+                keyword=StageRank(rank=rank, score=score),
+            )
+            for rank, (score, e) in enumerate(by_score[:k], start=1)
+        ]
 
 
-def _cosine(a: Embedding, b: Embedding) -> float:
+# pgvector does not index zero vectors for cosine distance, so they are never found.
+def _cosine_distance(a: Embedding, b: Embedding) -> float | None:
     norms = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(x * x for x in b))
     if not norms:
-        return 0.0
-    return sum(x * y for x, y in zip(a, b, strict=True)) / norms
-
-
-def _top_k(
-    scored: list[tuple[float, _Entry]], k: int, retriever: Retriever
-) -> list[RetrievedChunk]:
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [
-        RetrievedChunk(
-            chunk=entry.chunk, filename=entry.filename, score=score, retriever=retriever
-        )
-        for score, entry in scored[:k]
-    ]
+        return None
+    return 1 - sum(x * y for x, y in zip(a, b, strict=True)) / norms
 
 
 if TYPE_CHECKING:

@@ -1,14 +1,18 @@
 import dataclasses
+import math
 from typing import Protocol
+from uuid import UUID
 
 import pytest
 
 from rag_anatomy.adapters.driven.postgres import EMBEDDING_DIMENSIONS, PgVectorStore
 from rag_anatomy.domain import (
+    Chunk,
     DuplicateContentError,
+    Embedding,
     FilenameConflictError,
     RetrievedChunk,
-    Retriever,
+    StageRank,
 )
 from rag_anatomy.ports import DocumentRepository, KeywordSearch, VectorSearch
 from tests.builders import make_chunks, make_document
@@ -44,9 +48,29 @@ def _texts(results: list[RetrievedChunk]) -> list[str]:
     return [r.chunk.text for r in results]
 
 
-def _assert_ranked(results: list[RetrievedChunk]) -> None:
-    scores = [r.score for r in results]
+def _ids(results: list[RetrievedChunk]) -> list[UUID]:
+    return [r.chunk.id for r in results]
+
+
+def _assert_ranked(stages: list[StageRank | None]) -> list[float]:
+    present = [stage for stage in stages if stage is not None]
+    assert len(present) == len(stages)
+    assert [stage.rank for stage in present] == list(range(1, len(present) + 1))
+    scores = [stage.score for stage in present]
     assert scores == sorted(scores, reverse=True)
+    return scores
+
+
+# Neither this order nor its reverse is id order, so only an explicit tie-break by id
+# can produce it; pgvector returns duplicate vectors in reverse insertion order.
+def _scrambled(chunks: list[Chunk]) -> list[Chunk]:
+    return [chunks[1], chunks[0], chunks[2], *chunks[3:]]
+
+
+def _cosine_similarity(a: Embedding, b: Embedding) -> float:
+    return math.fsum(x * y for x, y in zip(a, b, strict=True)) / math.sqrt(
+        math.fsum(x * x for x in a) * math.fsum(y * y for y in b)
+    )
 
 
 async def test_saved_document_is_found_by_hash_and_filename(store: Store) -> None:
@@ -106,9 +130,77 @@ async def test_vector_search_ranks_by_similarity_and_respects_k(store: Store) ->
     )
     assert _texts(results)[0] == "keyword search"
     assert len(results) == 2
-    _assert_ranked(results)
-    assert {r.retriever for r in results} == {Retriever.DENSE}
-    assert {r.filename for r in results} == {"guide.txt"}
+    _assert_ranked([r.dense for r in results])
+    assert all((r.keyword, r.fusion, r.rerank) == (None, None, None) for r in results)
+    assert {r.document.filename for r in results} == {"guide.txt"}
+
+
+async def test_vector_search_orders_by_cosine_distance(store: Store) -> None:
+    texts = [
+        "chunk overlap",
+        "chunking strategies",
+        "cooking pasta",
+        "chunks and pages",
+        "reciprocal rank fusion",
+        "chunk",
+        "vector index",
+        "overlapping chunks",
+    ]
+    await _save(store, *texts)
+    query = await embedder.embed_query("chunking with overlap")
+    vectors = await embedder.embed_documents(texts)
+    similarity = {
+        text: _cosine_similarity(query, vector)
+        for text, vector in zip(texts, vectors, strict=True)
+    }
+    results = await store.vector_search(query, k=5)
+    assert (
+        _texts(results) == sorted(texts, key=similarity.__getitem__, reverse=True)[:5]
+    )
+    scores = _assert_ranked([r.dense for r in results])
+    assert scores == pytest.approx(
+        [similarity[text] for text in _texts(results)], abs=1e-6
+    )
+
+
+async def test_vector_search_breaks_ties_by_chunk_id(store: Store) -> None:
+    document = make_document()
+    chunks = _scrambled(make_chunks(document, *["same text"] * 3, "other text"))
+    await store.save(
+        document, chunks, await embedder.embed_documents([c.text for c in chunks])
+    )
+    results = await store.vector_search(await embedder.embed_query("same text"), k=2)
+    tied = sorted(c.id for c in chunks if c.text == "same text")
+    assert _ids(results) == tied[:2]
+
+
+async def test_vector_search_returns_more_than_default_ef_search(
+    store: Store,
+) -> None:
+    await _save(store, *[f"chunk number {n}" for n in range(60)])
+    results = await store.vector_search(await embedder.embed_query("chunk"), k=45)
+    assert len(results) == 45
+
+
+async def test_vector_search_after_replace_returns_full_count(store: Store) -> None:
+    old = make_document("report.pdf", content=b"v1")
+    old_texts = [f"report section {n} of the old revision" for n in range(60)]
+    await store.save(
+        old, make_chunks(old, *old_texts), await embedder.embed_documents(old_texts)
+    )
+    new = make_document("report.pdf", content=b"v2")
+    new_texts = [f"report section {n} of the new revision" for n in range(60)]
+    await store.replace(
+        old.id,
+        new,
+        make_chunks(new, *new_texts),
+        await embedder.embed_documents(new_texts),
+    )
+    results = await store.vector_search(
+        await embedder.embed_query("report section"), k=50
+    )
+    assert len(results) == 50
+    assert {r.document for r in results} == {new}
 
 
 async def test_retrieved_chunk_equals_saved_chunk(store: Store) -> None:
@@ -119,15 +211,26 @@ async def test_retrieved_chunk_equals_saved_chunk(store: Store) -> None:
     [dense] = await store.vector_search(await embedder.embed_query(chunk.text), k=1)
     [keyword] = await store.keyword_search("pages", k=1)
     assert dense.chunk == keyword.chunk == chunk
+    assert dense.document == keyword.document == document
 
 
 async def test_keyword_search_returns_only_matching_chunks(store: Store) -> None:
     await _save(store, "hybrid search with fusion", "search engines", "unrelated text")
     results = await store.keyword_search("hybrid search", k=10)
     assert _texts(results) == ["hybrid search with fusion", "search engines"]
-    assert all(r.score > 0 for r in results)
-    _assert_ranked(results)
-    assert {r.retriever for r in results} == {Retriever.KEYWORD}
+    assert all(score > 0 for score in _assert_ranked([r.keyword for r in results]))
+    assert all((r.dense, r.fusion, r.rerank) == (None, None, None) for r in results)
+
+
+async def test_keyword_search_breaks_ties_by_chunk_id(store: Store) -> None:
+    document = make_document()
+    chunks = _scrambled(make_chunks(document, *["tied words"] * 3, "unrelated"))
+    await store.save(
+        document, chunks, await embedder.embed_documents([c.text for c in chunks])
+    )
+    results = await store.keyword_search("tied", k=2)
+    tied = sorted(c.id for c in chunks if c.text == "tied words")
+    assert _ids(results) == tied[:2]
 
 
 async def test_keyword_search_answers_natural_language_questions(
@@ -186,7 +289,7 @@ async def test_replace_swaps_document_and_chunks_atomically(store: Store) -> Non
     assert await store.find_by_hash(old.content_hash) is None
     assert await store.find_by_filename("report.pdf") == new
     results = await store.keyword_search("figures", k=10)
-    assert [(r.chunk.text, r.filename) for r in results] == [
+    assert [(r.chunk.text, r.document.filename) for r in results] == [
         ("fresh figures", "Report.pdf")
     ]
 

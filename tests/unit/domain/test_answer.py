@@ -2,18 +2,12 @@ from uuid import uuid7
 
 import pytest
 
-from rag_anatomy.domain import Answer, Citation, RetrievedChunk, Retriever
-from tests.builders import make_chunks, make_document
+from rag_anatomy.domain import Answer, Citation, RetrievedChunk
+from tests.builders import make_document, make_retrieved
 
 
 def _context() -> tuple[RetrievedChunk, ...]:
-    chunks = make_chunks(make_document(), "first", "second")
-    return tuple(
-        RetrievedChunk(
-            chunk=c, filename="guide.txt", score=1.0, retriever=Retriever.DENSE
-        )
-        for c in chunks
-    )
+    return tuple(make_retrieved(make_document(), "first", "second"))
 
 
 def test_answer_accepts_citations_from_context() -> None:

@@ -29,3 +29,26 @@ class InvalidEncodingError(Exception):
     def __init__(self, encoding: str) -> None:
         super().__init__(f"content is not valid {encoding}")
         self.encoding = encoding
+
+
+class EncryptedDocumentError(Exception):
+    def __init__(self, media_type: str) -> None:
+        super().__init__(
+            f"{media_type} content is password-protected; remove the password and retry"
+        )
+        self.media_type = media_type
+
+
+class CorruptDocumentError(Exception):
+    def __init__(self, media_type: str) -> None:
+        super().__init__(f"content is not a valid {media_type} file")
+        self.media_type = media_type
+
+
+class EmptyQueryError(Exception):
+    def __init__(self) -> None:
+        super().__init__("query contains no text to search for")
+
+
+class EmbeddingError(Exception):
+    pass

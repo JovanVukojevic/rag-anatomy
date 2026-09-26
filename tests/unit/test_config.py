@@ -55,3 +55,30 @@ def test_empty_openai_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "")
     with pytest.raises(ValidationError):
         OpenAISettings(_env_file=None)
+
+
+def test_embedding_settings_have_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    settings = OpenAISettings(_env_file=None)
+    assert settings.embedding_model == "text-embedding-3-small"
+    assert settings.embedding_dimensions == 1536
+    assert settings.timeout == 30.0
+    assert settings.max_retries == 3
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("OPENAI_EMBEDDING_MODEL", ""),
+        ("OPENAI_EMBEDDING_DIMENSIONS", "0"),
+        ("OPENAI_TIMEOUT", "0"),
+        ("OPENAI_MAX_RETRIES", "-1"),
+    ],
+)
+def test_invalid_embedding_settings_are_rejected(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValidationError):
+        OpenAISettings(_env_file=None)

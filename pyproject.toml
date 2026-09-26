@@ -8,9 +8,13 @@ license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
+    "httpx2>=2.13.1",
+    "openai>=3.19.2",
     "pgvector>=0.5.0",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic-settings>=2.15.0",
+    "pypdfium2>=5.13.0",
+    "python-docx>=1.2.0",
     "sqlalchemy>=2.1.1",
     "tiktoken>=0.14.0",
 ]
@@ -39,6 +43,10 @@ script_location = "rag_anatomy.adapters.driven.postgres:migrations"
 [tool.ruff.lint]
 select = ["F", "E4", "E7", "E9", "I", "UP", "B", "RUF", "TID", "ERA"]
 
+[tool.ruff.lint.per-file-ignores]
+# Serbian Cyrillic test data looks like Latin to the confusables check.
+"tests/**" = ["RUF001"]
+
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "unittest.mock".msg = "Use a hand-written fake from tests/fakes/."
 "abc.ABC".msg = "Use typing.Protocol."
@@ -49,6 +57,7 @@ files = ["src", "tests"]
 warn_unreachable = true
 enable_error_code = ["ignore-without-code"]
 plugins = ["pydantic.mypy"]
+mypy_path = "typings"
 
 [tool.pytest]
 minversion = "9.0"
@@ -66,6 +75,7 @@ include_external_packages = true
 name = "Dependencies point inward"
 type = "layers"
 layers = [
+    "rag_anatomy.container",
     "rag_anatomy.adapters",
     "rag_anatomy.services",
     "rag_anatomy.ports",
@@ -89,6 +99,7 @@ forbidden_modules = [
     "fastapi",
     "starlette",
     "httpx",
+    "httpx2",
     "pydantic",
     "pydantic_settings",
     "dotenv",
@@ -96,6 +107,9 @@ forbidden_modules = [
     "sqlalchemy",
     "testcontainers",
     "pypdf",
+    "pypdfium2",
+    "docx",
+    "lxml",
     "tiktoken",
 ]
 

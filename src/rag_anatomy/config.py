@@ -27,3 +27,7 @@ class OpenAISettings(BaseSettings):
     )
 
     api_key: SecretStr = Field(min_length=1)
+    embedding_model: str = Field("text-embedding-3-small", min_length=1)
+    embedding_dimensions: int = Field(1536, gt=0)
+    timeout: float = Field(30.0, gt=0)
+    max_retries: int = Field(3, ge=0)

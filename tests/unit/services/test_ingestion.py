@@ -6,6 +6,7 @@ import pytest
 from rag_anatomy.adapters.driven.chunking import TokenChunker
 from rag_anatomy.domain import (
     DuplicateContentError,
+    EmbeddingError,
     EmptyDocumentError,
     FilenameConflictError,
     UnsupportedMediaTypeError,
@@ -144,6 +145,26 @@ async def test_each_chunk_is_saved_with_its_own_embedding() -> None:
         query = await h.embedder.embed_query(chunk.text)
         [nearest] = await h.store.vector_search(query, k=1)
         assert nearest.chunk == chunk
+
+
+async def test_failed_batches_surface_as_the_first_failure() -> None:
+    first, second = EmbeddingError("batch 0"), EmbeddingError("batch 1")
+    store = InMemoryStore()
+    service = IngestionService(
+        FakeParser(),
+        TokenChunker(chunk_size=20, overlap=5),
+        FakeEmbedder(failures={0: first, 1: second}),
+        store,
+        batch_size=3,
+        max_concurrency=2,
+    )
+    with pytest.raises(EmbeddingError) as raised:
+        await service.ingest(_ARTICLE, "guide.txt", "text/plain")
+    assert raised.value is first
+    group = raised.value.__cause__
+    assert isinstance(group, ExceptionGroup)
+    assert list(group.exceptions) == [first, second]
+    assert await store.find_by_filename("guide.txt") is None
 
 
 async def test_unsupported_media_type_saves_nothing() -> None:

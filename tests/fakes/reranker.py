@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from rag_anatomy.domain import RetrievedChunk, Retriever
+from rag_anatomy.domain import RetrievedChunk, StageRank
 from rag_anatomy.ports import Reranker
 from tests.fakes._text import overlap
 
@@ -17,8 +17,8 @@ class FakeReranker:
             reverse=True,
         )
         return [
-            replace(candidate, score=score, retriever=Retriever.RERANK)
-            for score, candidate in scored[:k]
+            replace(candidate, rerank=StageRank(rank=rank, score=score))
+            for rank, (score, candidate) in enumerate(scored[:k], start=1)
         ]
 
 

@@ -29,7 +29,7 @@ class DocumentRepository(Protocol):
 
 
 class VectorSearch(Protocol):
-    """Returns up to k chunks nearest to the embedding, best first."""
+    """Returns the k chunks nearest by cosine distance (fewer only if fewer exist), best first, ties by chunk id."""
 
     async def vector_search(
         self, embedding: Embedding, k: int
@@ -37,6 +37,6 @@ class VectorSearch(Protocol):
 
 
 class KeywordSearch(Protocol):
-    """Returns up to k chunks matching the query terms, best first."""
+    """Returns up to k chunks matching the query terms, best first, ties by chunk id."""
 
     async def keyword_search(self, query: str, k: int) -> list[RetrievedChunk]: ...
