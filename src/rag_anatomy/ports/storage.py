@@ -29,7 +29,7 @@ class DocumentRepository(Protocol):
 
 
 class VectorSearch(Protocol):
-    """Returns the k chunks nearest by cosine distance (fewer only if fewer exist), best first, ties by chunk id."""
+    """Returns up to k chunks nearest by cosine distance, best first, ties by chunk id; an approximate index may miss some."""
 
     async def vector_search(
         self, embedding: Embedding, k: int

@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from rag_anatomy.adapters.driven.parsing._normalize import media_type_essence
+from rag_anatomy.adapters.driven.parsing._media_type import media_type_essence
 from rag_anatomy.domain import Page, UnsupportedMediaTypeError
 from rag_anatomy.ports import DocumentParser
 

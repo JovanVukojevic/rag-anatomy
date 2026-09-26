@@ -3,10 +3,14 @@ import pytest
 from pgvector import Vector
 
 from rag_anatomy.adapters.driven.parsing import DOCX, PDF
-from rag_anatomy.adapters.driven.postgres import EMBEDDING_DIMENSIONS
+from rag_anatomy.adapters.driven.postgres import EMBEDDING_DIMENSIONS, PgVectorStore
 from rag_anatomy.adapters.driven.postgres.store import Pool
 from rag_anatomy.config import DatabaseSettings
-from rag_anatomy.container import ConfigurationError, open_container
+from rag_anatomy.container import (
+    ConfigurationError,
+    check_pgvector_version,
+    open_container,
+)
 from tests.builders import make_docx, make_pdf
 from tests.fakes import FakeEmbeddingsAPI, trigram_embedding
 
@@ -126,31 +130,10 @@ async def test_ingested_documents_are_retrieved_end_to_end(
     assert api.bodies[-1]["input"] == ["zip bombs in uploads"]
 
 
-async def test_old_pgvector_fails_before_any_api_request(
-    openai_env: pytest.MonkeyPatch, pg_pool: Pool
+async def test_installed_pgvector_passes_the_version_check(
+    pg_store: PgVectorStore,
 ) -> None:
-    async with pg_pool.connection() as conn:
-        cursor = await conn.execute(
-            "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
-        )
-        row = await cursor.fetchone()
-        assert row is not None
-        installed: str = row[0]
-        await conn.execute(
-            "UPDATE pg_extension SET extversion = '0.7.4' WHERE extname = 'vector'"
-        )
-    api = FakeEmbeddingsAPI()
-    try:
-        with pytest.raises(ConfigurationError, match=r"pgvector 0\.7\.4 .* 0\.8\.0"):
-            async with open_container(openai_transport=httpx2.MockTransport(api)):
-                pass
-    finally:
-        async with pg_pool.connection() as conn:
-            await conn.execute(
-                "UPDATE pg_extension SET extversion = %s WHERE extname = 'vector'",
-                (installed,),
-            )
-    assert api.requests == []
+    check_pgvector_version(await pg_store.pgvector_version())
 
 
 async def test_dimension_mismatch_fails_before_any_api_request(

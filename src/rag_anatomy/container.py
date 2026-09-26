@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ _EMBEDDING_BATCH_SIZE = min(
     256, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST // _CHUNK_SIZE
 )
 _EMBEDDING_CONCURRENCY = 4
+_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 class ConfigurationError(Exception):
@@ -61,7 +63,7 @@ async def open_container(
     ) as pool:
         await pool.wait(_DATABASE_TIMEOUT)
         store = PgVectorStore(pool)
-        await _check_pgvector_version(store)
+        check_pgvector_version(await store.pgvector_version())
         await _check_embedding_space(store, openai)
         chunker = await asyncio.to_thread(
             TokenChunker,
@@ -101,17 +103,19 @@ def _parser() -> CompositeParser:
     return CompositeParser(parsers)
 
 
-async def _check_pgvector_version(store: PgVectorStore) -> None:
-    installed = await store.pgvector_version()
-    if installed < MIN_PGVECTOR_VERSION:
+def check_pgvector_version(installed: str) -> None:
+    required = ".".join(map(str, MIN_PGVECTOR_VERSION))
+    match = _VERSION.fullmatch(installed)
+    if match is None:
         raise ConfigurationError(
-            f"pgvector {_dotted(installed)} is installed, but vector search needs "
-            f"{_dotted(MIN_PGVECTOR_VERSION)} or later for iterative index scans"
+            f"cannot parse pgvector version {installed!r}; vector search needs "
+            f"{required} or later"
         )
-
-
-def _dotted(version: tuple[int, ...]) -> str:
-    return ".".join(map(str, version))
+    if tuple(map(int, match.groups())) < MIN_PGVECTOR_VERSION:
+        raise ConfigurationError(
+            f"pgvector {installed} is installed, but vector search needs "
+            f"{required} or later for iterative index scans"
+        )
 
 
 async def _check_embedding_space(store: PgVectorStore, openai: OpenAISettings) -> None:

@@ -1,4 +1,5 @@
 import dataclasses
+import itertools
 import math
 from typing import Protocol
 from uuid import UUID
@@ -33,6 +34,42 @@ def store(request: pytest.FixtureRequest) -> Store:
 
 
 embedder = FakeEmbedder(dimensions=EMBEDDING_DIMENSIONS)
+
+# Sets of near-duplicates ("chunk number 1", "chunk number 2", ...) leave HNSW nodes that
+# no search can reach, so tests that count results use topics this varied (D49).
+_SUBJECTS = [
+    "retrieval",
+    "pgvector",
+    "tokenizer",
+    "citation",
+    "reranker",
+    "fusion",
+    "overlap",
+    "embedding",
+    "postgres",
+    "chunking",
+    "latency",
+    "recall",
+    "sentence",
+    "paragraph",
+    "language",
+    "serbian",
+]
+_OBJECTS = [
+    "budget",
+    "garden",
+    "river",
+    "violin",
+    "harbor",
+    "pepper",
+    "castle",
+    "meadow",
+]
+
+
+def _topics(count: int) -> list[str]:
+    pairs = itertools.islice(itertools.product(_SUBJECTS, _OBJECTS), count)
+    return [f"{subject} {obj}" for subject, obj in pairs]
 
 
 async def _save(store: Store, *texts: str, filename: str = "guide.txt") -> None:
@@ -177,28 +214,26 @@ async def test_vector_search_breaks_ties_by_chunk_id(store: Store) -> None:
 async def test_vector_search_returns_more_than_default_ef_search(
     store: Store,
 ) -> None:
-    await _save(store, *[f"chunk number {n}" for n in range(60)])
-    results = await store.vector_search(await embedder.embed_query("chunk"), k=45)
+    await _save(store, *_topics(60))
+    results = await store.vector_search(await embedder.embed_query("retrieval"), k=45)
     assert len(results) == 45
 
 
 async def test_vector_search_after_replace_returns_full_count(store: Store) -> None:
     old = make_document("report.pdf", content=b"v1")
-    old_texts = [f"report section {n} of the old revision" for n in range(60)]
+    old_texts = [f"{topic} in the old revision" for topic in _topics(60)]
     await store.save(
         old, make_chunks(old, *old_texts), await embedder.embed_documents(old_texts)
     )
     new = make_document("report.pdf", content=b"v2")
-    new_texts = [f"report section {n} of the new revision" for n in range(60)]
+    new_texts = [f"{topic} in the new revision" for topic in _topics(60)]
     await store.replace(
         old.id,
         new,
         make_chunks(new, *new_texts),
         await embedder.embed_documents(new_texts),
     )
-    results = await store.vector_search(
-        await embedder.embed_query("report section"), k=50
-    )
+    results = await store.vector_search(await embedder.embed_query("retrieval"), k=50)
     assert len(results) == 50
     assert {r.document for r in results} == {new}
 

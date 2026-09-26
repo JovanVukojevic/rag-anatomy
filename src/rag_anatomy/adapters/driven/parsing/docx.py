@@ -8,7 +8,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.table import Table, _Cell, _Row
 from docx.text.paragraph import Paragraph
 
-from rag_anatomy.adapters.driven.parsing._normalize import media_type_essence
+from rag_anatomy.adapters.driven.parsing._media_type import media_type_essence
 from rag_anatomy.domain import (
     CorruptDocumentError,
     EncryptedDocumentError,

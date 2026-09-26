@@ -8,7 +8,6 @@ from pgvector import Vector
 from rag_anatomy.adapters.driven.postgres import (
     EMBEDDING_DIMENSIONS,
     MAX_SEARCH_K,
-    MIN_PGVECTOR_VERSION,
     EmbeddingSpace,
     PgVectorStore,
 )
@@ -88,10 +87,6 @@ async def test_vector_search_rejects_k_hnsw_cannot_serve(
 ) -> None:
     with pytest.raises(ValueError, match="k must be"):
         await pg_store.vector_search(_axis(0), k=k)
-
-
-async def test_pgvector_supports_iterative_scans(pg_store: PgVectorStore) -> None:
-    assert await pg_store.pgvector_version() >= MIN_PGVECTOR_VERSION
 
 
 async def test_concurrent_saves_of_same_content_admit_one(

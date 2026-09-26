@@ -149,7 +149,7 @@ class PgVectorStore:
             raise LookupError("embedding_space is empty after claiming it")
         return EmbeddingSpace(model=row[0], dimensions=row[1])
 
-    async def pgvector_version(self) -> tuple[int, ...]:
+    async def pgvector_version(self) -> str:
         async with self._pool.connection() as conn:
             cursor = await conn.execute(_PGVECTOR_VERSION)
             row = await cursor.fetchone()
@@ -158,7 +158,7 @@ class PgVectorStore:
                 "the vector extension is not installed; run the migrations"
             )
         version: str = row[0]
-        return tuple(int(part) for part in version.split("."))
+        return version
 
     async def find_by_hash(self, content_hash: str) -> Document | None:
         async with self._pool.connection() as conn:

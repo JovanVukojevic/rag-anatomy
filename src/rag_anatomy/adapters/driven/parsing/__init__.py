@@ -1,4 +1,4 @@
-from rag_anatomy.adapters.driven.parsing._normalize import media_type_essence
+from rag_anatomy.adapters.driven.parsing._media_type import media_type_essence
 from rag_anatomy.adapters.driven.parsing.composite import CompositeParser
 from rag_anatomy.adapters.driven.parsing.docx import DOCX, DocxParser
 from rag_anatomy.adapters.driven.parsing.pdf import PDF, PdfParser
