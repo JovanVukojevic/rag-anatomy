@@ -5,7 +5,11 @@ from rag_anatomy.ports import DocumentParser
 
 
 class FakeParser:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     async def parse(self, content: bytes, media_type: str) -> list[Page]:
+        self.calls.append(media_type)
         if media_type != "text/plain":
             raise UnsupportedMediaTypeError(media_type)
         return [

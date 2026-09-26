@@ -16,3 +16,11 @@ async def test_form_feeds_split_numbered_pages() -> None:
 async def test_other_media_types_are_unsupported() -> None:
     with pytest.raises(UnsupportedMediaTypeError):
         await FakeParser().parse(b"%PDF", "application/pdf")
+
+
+async def test_calls_are_recorded_even_when_rejected() -> None:
+    parser = FakeParser()
+    await parser.parse(b"text", "text/plain")
+    with pytest.raises(UnsupportedMediaTypeError):
+        await parser.parse(b"%PDF", "application/pdf")
+    assert parser.calls == ["text/plain", "application/pdf"]

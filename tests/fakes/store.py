@@ -48,14 +48,49 @@ class InMemoryStore:
         chunks: Sequence[Chunk],
         embeddings: Sequence[Embedding],
     ) -> None:
+        self._check(document, chunks, embeddings, others=list(self._documents.values()))
+        self._insert(document, chunks, embeddings)
+
+    async def replace(
+        self,
+        existing_id: UUID,
+        document: Document,
+        chunks: Sequence[Chunk],
+        embeddings: Sequence[Embedding],
+    ) -> None:
+        if existing_id not in self._documents:
+            raise LookupError(f"no document with id {existing_id}")
+        others = [d for d in self._documents.values() if d.id != existing_id]
+        self._check(document, chunks, embeddings, others=others)
+        del self._documents[existing_id]
+        self._entries = [e for e in self._entries if e.chunk.document_id != existing_id]
+        self._insert(document, chunks, embeddings)
+
+    def _check(
+        self,
+        document: Document,
+        chunks: Sequence[Chunk],
+        embeddings: Sequence[Embedding],
+        *,
+        others: list[Document],
+    ) -> None:
         if len(chunks) != len(embeddings):
             raise ValueError(f"{len(chunks)} chunks but {len(embeddings)} embeddings")
         if any(chunk.document_id != document.id for chunk in chunks):
             raise ValueError("every chunk must belong to the saved document")
-        if existing := await self.find_by_hash(document.content_hash):
-            raise DuplicateContentError(existing)
-        if existing := await self.find_by_filename(document.filename):
-            raise FilenameConflictError(existing)
+        for existing in others:
+            if existing.content_hash == document.content_hash:
+                raise DuplicateContentError(existing)
+        for existing in others:
+            if existing.filename.casefold() == document.filename.casefold():
+                raise FilenameConflictError(existing)
+
+    def _insert(
+        self,
+        document: Document,
+        chunks: Sequence[Chunk],
+        embeddings: Sequence[Embedding],
+    ) -> None:
         self._documents[document.id] = document
         self._entries.extend(
             _Entry(chunk, embedding, document.filename)

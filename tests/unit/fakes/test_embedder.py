@@ -28,3 +28,10 @@ async def test_similar_words_have_similar_embeddings() -> None:
 
 async def test_empty_text_embeds_to_zero_vector() -> None:
     assert await FakeEmbedder(dimensions=8).embed_query("") == [0.0] * 8
+
+
+async def test_batches_are_recorded_in_call_order() -> None:
+    embedder = FakeEmbedder()
+    await embedder.embed_documents(["a", "b"])
+    await embedder.embed_documents(["c"])
+    assert embedder.batches == [["a", "b"], ["c"]]

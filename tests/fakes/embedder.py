@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import math
 from collections.abc import Sequence
@@ -11,9 +12,19 @@ from tests.fakes._text import words
 class FakeEmbedder:
     def __init__(self, dimensions: int = 256) -> None:
         self.dimensions = dimensions
+        self.batches: list[list[str]] = []
+        self.max_in_flight = 0
+        self._in_flight = 0
 
     async def embed_documents(self, texts: Sequence[str]) -> list[Embedding]:
-        return [self._embed(text) for text in texts]
+        self.batches.append(list(texts))
+        self._in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(0)
+            return [self._embed(text) for text in texts]
+        finally:
+            self._in_flight -= 1
 
     async def embed_query(self, text: str) -> Embedding:
         return self._embed(text)

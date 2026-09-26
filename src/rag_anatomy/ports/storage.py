@@ -1,11 +1,12 @@
 from collections.abc import Sequence
 from typing import Protocol
+from uuid import UUID
 
 from rag_anatomy.domain import Chunk, Document, Embedding, RetrievedChunk
 
 
 class DocumentRepository(Protocol):
-    """Saves documents atomically; rejects duplicate content and filenames (any case)."""
+    """Saves or replaces documents atomically; rejects duplicate content and filenames (any case)."""
 
     async def find_by_hash(self, content_hash: str) -> Document | None: ...
 
@@ -13,6 +14,14 @@ class DocumentRepository(Protocol):
 
     async def save(
         self,
+        document: Document,
+        chunks: Sequence[Chunk],
+        embeddings: Sequence[Embedding],
+    ) -> None: ...
+
+    async def replace(
+        self,
+        existing_id: UUID,
         document: Document,
         chunks: Sequence[Chunk],
         embeddings: Sequence[Embedding],

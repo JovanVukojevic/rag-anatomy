@@ -6,7 +6,9 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "tiktoken>=0.14.0",
+]
 
 [dependency-groups]
 dev = [
@@ -78,6 +80,7 @@ forbidden_modules = [
     "httpx",
     "pydantic",
     "pypdf",
+    "tiktoken",
 ]
 
 [tool.coverage.run]

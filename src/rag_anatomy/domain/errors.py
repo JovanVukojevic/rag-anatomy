@@ -17,3 +17,15 @@ class UnsupportedMediaTypeError(Exception):
     def __init__(self, media_type: str) -> None:
         super().__init__(f"unsupported media type {media_type!r}")
         self.media_type = media_type
+
+
+class EmptyDocumentError(Exception):
+    def __init__(self, filename: str) -> None:
+        super().__init__(f"{filename!r} contains no text to index")
+        self.filename = filename
+
+
+class InvalidEncodingError(Exception):
+    def __init__(self, encoding: str) -> None:
+        super().__init__(f"content is not valid {encoding}")
+        self.encoding = encoding

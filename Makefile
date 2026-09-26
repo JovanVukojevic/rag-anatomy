@@ -1,4 +1,6 @@
-.PHONY: lint format typecheck test check
+.PHONY: lint format typecheck encodings test check
+
+export TIKTOKEN_CACHE_DIR ?= $(CURDIR)/.cache/tiktoken
 
 lint:
 	uv run ruff check
@@ -12,7 +14,10 @@ format:
 typecheck:
 	uv run mypy
 
-test:
+encodings:
+	uv run python -c "import tiktoken; tiktoken.encoding_for_model('text-embedding-3-small')"
+
+test: encodings
 	uv run pytest --cov
 
 check: lint typecheck test

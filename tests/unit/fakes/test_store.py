@@ -86,3 +86,55 @@ async def test_keyword_search_returns_only_matching_chunks() -> None:
         ("search engines", 0.5),
     ]
     assert {r.retriever for r in results} == {Retriever.KEYWORD}
+
+
+async def test_replace_swaps_document_and_chunks_atomically() -> None:
+    store = InMemoryStore()
+    embedder = FakeEmbedder()
+    old = make_document("report.pdf", content=b"v1")
+    await store.save(
+        old,
+        make_chunks(old, "stale figures"),
+        await embedder.embed_documents(["stale figures"]),
+    )
+    new = make_document("Report.pdf", content=b"v2")
+    await store.replace(
+        old.id,
+        new,
+        make_chunks(new, "fresh figures"),
+        await embedder.embed_documents(["fresh figures"]),
+    )
+    assert await store.find_by_hash(old.content_hash) is None
+    assert await store.find_by_filename("report.pdf") == new
+    results = await store.keyword_search("figures", k=10)
+    assert [(r.chunk.text, r.filename) for r in results] == [
+        ("fresh figures", "Report.pdf")
+    ]
+
+
+async def test_replace_rejects_duplicate_content_and_leaves_store_unchanged() -> None:
+    store = InMemoryStore()
+    old = make_document("report.pdf", content=b"v1")
+    other = make_document("other.pdf", content=b"v2")
+    await store.save(old, [], [])
+    await store.save(other, [], [])
+    with pytest.raises(DuplicateContentError) as raised:
+        await store.replace(old.id, make_document("report.pdf", content=b"v2"), [], [])
+    assert raised.value.existing == other
+    assert await store.find_by_filename("report.pdf") == old
+
+
+async def test_replace_rejects_filename_of_another_document() -> None:
+    store = InMemoryStore()
+    old = make_document("report.pdf", content=b"v1")
+    other = make_document("other.pdf", content=b"v2")
+    await store.save(old, [], [])
+    await store.save(other, [], [])
+    with pytest.raises(FilenameConflictError) as raised:
+        await store.replace(old.id, make_document("OTHER.pdf", content=b"v3"), [], [])
+    assert raised.value.existing == other
+
+
+async def test_replace_of_unknown_document_raises() -> None:
+    with pytest.raises(LookupError):
+        await InMemoryStore().replace(make_document().id, make_document(), [], [])
