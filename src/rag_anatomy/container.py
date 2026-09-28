@@ -39,6 +39,7 @@ _EMBEDDING_BATCH_SIZE = min(
     256, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST // _CHUNK_SIZE
 )
 _EMBEDDING_CONCURRENCY = 4
+_CANDIDATE_POOL = 50
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -91,7 +92,9 @@ async def open_container(
                     batch_size=_EMBEDDING_BATCH_SIZE,
                     max_concurrency=_EMBEDDING_CONCURRENCY,
                 ),
-                retrieval=RetrievalService(embedder, store),
+                retrieval=RetrievalService(
+                    embedder, store, store, candidate_pool=_CANDIDATE_POOL
+                ),
             )
 
 

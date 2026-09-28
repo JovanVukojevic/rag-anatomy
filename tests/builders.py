@@ -1,7 +1,8 @@
 import hashlib
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import uuid7
 
 import docx
@@ -44,6 +45,21 @@ def make_retrieved(document: Document, *texts: str) -> list[RetrievedChunk]:
             dense=StageRank(rank=rank, score=1 / rank),
         )
         for rank, chunk in enumerate(make_chunks(document, *texts), start=1)
+    ]
+
+
+def make_ranking(
+    document: Document, chunks: Sequence[Chunk], *, stage: Literal["dense", "keyword"]
+) -> list[RetrievedChunk]:
+    ranks = [StageRank(rank=rank, score=1 / rank) for rank in range(1, len(chunks) + 1)]
+    return [
+        RetrievedChunk(
+            chunk=chunk,
+            document=document,
+            dense=rank if stage == "dense" else None,
+            keyword=rank if stage == "keyword" else None,
+        )
+        for chunk, rank in zip(chunks, ranks, strict=True)
     ]
 
 

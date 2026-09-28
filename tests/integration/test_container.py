@@ -11,10 +11,13 @@ from rag_anatomy.container import (
     check_pgvector_version,
     open_container,
 )
+from rag_anatomy.services import RetrievalMode
 from tests.builders import make_docx, make_pdf
 from tests.fakes import FakeEmbeddingsAPI, trigram_embedding
 
 pytestmark = pytest.mark.integration
+
+DENSE = RetrievalMode.DENSE
 
 _LATIN_MARKER = "Šta je hibridna pretraga? Čačak, ćevapi, žaba i đak."
 _CYRILLIC_MARKER = "Шта је хибридна претрага? Ђак, Љубав, Њива, Џеп."
@@ -104,9 +107,13 @@ async def test_ingested_documents_are_retrieved_end_to_end(
         await container.ingestion.ingest(
             make_docx(lambda d: d.add_paragraph(_DOCX_TEXT)), "limits.docx", DOCX
         )
-        fusion = await container.retrieval.retrieve("rank fusion", top_k=3)
-        cyrillic = await container.retrieval.retrieve(_CYRILLIC_QUERY, top_k=3)
-        docx = await container.retrieval.retrieve("zip bombs in uploads", top_k=3)
+        fusion = await container.retrieval.retrieve("rank fusion", top_k=3, mode=DENSE)
+        cyrillic = await container.retrieval.retrieve(
+            _CYRILLIC_QUERY, top_k=3, mode=DENSE
+        )
+        docx = await container.retrieval.retrieve(
+            "zip bombs in uploads", top_k=3, mode=DENSE
+        )
 
     top = fusion[0]
     assert "rank fusion" in top.chunk.text
@@ -128,6 +135,38 @@ async def test_ingested_documents_are_retrieved_end_to_end(
         for results in (fusion, cyrillic, docx)
     )
     assert api.bodies[-1]["input"] == ["zip bombs in uploads"]
+
+
+async def test_hybrid_query_fuses_dense_and_keyword_hits_end_to_end(
+    openai_env: pytest.MonkeyPatch,
+) -> None:
+    api = FakeEmbeddingsAPI()
+    async with open_container(openai_transport=httpx2.MockTransport(api)) as container:
+        await container.ingestion.ingest(make_pdf(*_PAGES), "hybrid.pdf", PDF)
+        results = await container.retrieval.retrieve("rank fusion", top_k=3)
+
+    assert [r.fusion.rank if r.fusion else None for r in results] == [1, 2, 3]
+    top = results[0]
+    assert top.dense and top.keyword
+    assert "rank fusion" in top.chunk.text
+
+
+async def test_latin_query_without_diacritics_matches_through_keyword_search(
+    openai_env: pytest.MonkeyPatch,
+) -> None:
+    api = FakeEmbeddingsAPI()
+    async with open_container(openai_transport=httpx2.MockTransport(api)) as container:
+        await container.ingestion.ingest(make_pdf(*_PAGES), "hybrid.pdf", PDF)
+        requests = len(api.requests)
+        results = await container.retrieval.retrieve(
+            "sta je hibridna pretraga cacak", top_k=3, mode=RetrievalMode.KEYWORD
+        )
+
+    top = results[0]
+    assert _LATIN_MARKER in top.chunk.text
+    assert top.keyword and top.keyword.rank == 1
+    assert top.dense is None
+    assert len(api.requests) == requests
 
 
 async def test_installed_pgvector_passes_the_version_check(

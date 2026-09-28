@@ -24,7 +24,10 @@ def trigram_embedding(text: str, dimensions: int) -> Embedding:
 
 class FakeEmbedder:
     def __init__(
-        self, dimensions: int = 256, failures: Mapping[int, Exception] | None = None
+        self,
+        dimensions: int = 256,
+        failures: Mapping[int, Exception] | None = None,
+        query_failure: Exception | None = None,
     ) -> None:
         self.dimensions = dimensions
         self.batches: list[list[str]] = []
@@ -33,6 +36,7 @@ class FakeEmbedder:
         self._in_flight = 0
         self._calls = 0
         self._failures = dict(failures or {})
+        self._query_failure = query_failure
 
     async def embed_documents(self, texts: Sequence[str]) -> list[Embedding]:
         call = self._calls
@@ -50,6 +54,8 @@ class FakeEmbedder:
 
     async def embed_query(self, text: str) -> Embedding:
         self.queries.append(text)
+        if self._query_failure is not None:
+            raise self._query_failure
         return trigram_embedding(text, self.dimensions)
 
 
