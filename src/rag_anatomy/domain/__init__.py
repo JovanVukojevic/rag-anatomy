@@ -10,6 +10,7 @@ from rag_anatomy.domain.errors import (
     EncryptedDocumentError,
     FilenameConflictError,
     InvalidEncodingError,
+    RerankError,
     UnsupportedMediaTypeError,
 )
 from rag_anatomy.domain.retrieval import Embedding, RetrievedChunk, StageRank
@@ -30,6 +31,7 @@ __all__ = [
     "FilenameConflictError",
     "InvalidEncodingError",
     "Page",
+    "RerankError",
     "RetrievedChunk",
     "StageRank",
     "UnsupportedMediaTypeError",

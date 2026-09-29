@@ -52,3 +52,7 @@ class EmptyQueryError(Exception):
 
 class EmbeddingError(Exception):
     pass
+
+
+class RerankError(Exception):
+    pass

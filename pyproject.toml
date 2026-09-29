@@ -65,7 +65,11 @@ testpaths = ["tests"]
 strict = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["integration: needs Docker (testcontainers)"]
+addopts = ["-m", "not reranker"]
+markers = [
+    "integration: needs Docker (testcontainers)",
+    "reranker: needs the TEI reranker image and model (make test-reranker)",
+]
 
 [tool.importlinter]
 root_package = "rag_anatomy"

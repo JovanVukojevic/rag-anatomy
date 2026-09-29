@@ -16,5 +16,29 @@ services:
       # Postgres 18 images keep PGDATA in a versioned subdirectory of this path.
       - postgres-data:/var/lib/postgresql
 
+  reranker:
+    profiles: ["rerank"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    command:
+      - --model-id=${RERANKER_MODEL:?set in .env}
+      - --revision=${RERANKER_REVISION:?set in .env}
+      - --max-batch-tokens=2048
+      - --tokenization-workers=2
+    ports:
+      - "127.0.0.1:${RERANKER_PORT:?set in .env}:80"
+    mem_limit: 6g
+    memswap_limit: 6g
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      # The first start downloads 2.3 GB of weights before the server listens.
+      start_period: 15m
+      start_interval: 5s
+    volumes:
+      - reranker-models:/data
+
 volumes:
   postgres-data:
+  reranker-models:

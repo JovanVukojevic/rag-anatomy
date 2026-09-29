@@ -1,3 +1,5 @@
+import logging
+
 import httpx2
 import pytest
 from pgvector import Vector
@@ -5,15 +7,21 @@ from pgvector import Vector
 from rag_anatomy.adapters.driven.parsing import DOCX, PDF
 from rag_anatomy.adapters.driven.postgres import EMBEDDING_DIMENSIONS, PgVectorStore
 from rag_anatomy.adapters.driven.postgres.store import Pool
-from rag_anatomy.config import DatabaseSettings
 from rag_anatomy.container import (
     ConfigurationError,
     check_pgvector_version,
     open_container,
 )
+from rag_anatomy.domain import RerankError
 from rag_anatomy.services import RetrievalMode
 from tests.builders import make_docx, make_pdf
-from tests.fakes import FakeEmbeddingsAPI, trigram_embedding
+from tests.fakes import (
+    RERANKER_MODEL,
+    RERANKER_REVISION,
+    FakeEmbeddingsAPI,
+    FakeRerankAPI,
+    trigram_embedding,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -39,17 +47,6 @@ _PAGES = (
     _LATIN_MARKER,
     _CYRILLIC_MARKER,
 )
-
-
-@pytest.fixture
-def openai_env(
-    database: DatabaseSettings, pg_pool: Pool, monkeypatch: pytest.MonkeyPatch
-) -> pytest.MonkeyPatch:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-    monkeypatch.setenv("OPENAI_EMBEDDING_DIMENSIONS", str(EMBEDDING_DIMENSIONS))
-    monkeypatch.setenv("OPENAI_MAX_RETRIES", "0")
-    return monkeypatch
 
 
 async def test_pdf_is_ingested_end_to_end(
@@ -217,3 +214,75 @@ async def test_model_switch_with_stored_chunks_fails_before_any_api_request(
         async with open_container(openai_transport=httpx2.MockTransport(api)):
             pass
     assert api.requests == []
+
+
+async def test_reranking_is_off_by_default_and_says_so(
+    openai_env: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    openai_env.delenv("RERANKER_ENABLED")
+    for name in ("HOST", "PORT", "MODEL", "REVISION"):
+        openai_env.delenv(f"RERANKER_{name}", raising=False)
+    caplog.set_level(logging.INFO, logger="rag_anatomy.container")
+    api = FakeEmbeddingsAPI()
+    async with open_container(openai_transport=httpx2.MockTransport(api)) as container:
+        await container.ingestion.ingest(make_pdf(*_PAGES), "hybrid.pdf", PDF)
+        results = await container.retrieval.retrieve("rank fusion", top_k=3)
+
+    assert results
+    assert all(r.rerank is None for r in results)
+    assert "reranking disabled" in caplog.messages
+
+
+async def test_enabled_reranking_reorders_results_end_to_end(
+    reranker_env: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="rag_anatomy.container")
+    tei = FakeRerankAPI()
+    async with open_container(
+        openai_transport=httpx2.MockTransport(FakeEmbeddingsAPI()),
+        reranker_transport=httpx2.MockTransport(tei),
+    ) as container:
+        await container.ingestion.ingest(make_pdf(*_PAGES), "hybrid.pdf", PDF)
+        results = await container.retrieval.retrieve("rank fusion", top_k=3)
+
+    assert [r.rerank.rank if r.rerank else None for r in results] == [1, 2, 3]
+    scores = [r.rerank.score for r in results if r.rerank]
+    assert scores == sorted(scores, reverse=True)
+    assert "rank fusion" in results[0].chunk.text
+    [rerank] = tei.bodies
+    assert rerank["query"] == "rank fusion"
+    assert f"reranking with {RERANKER_MODEL}@{RERANKER_REVISION}, pool 20" in (
+        caplog.messages
+    )
+
+
+@pytest.mark.parametrize(
+    "tei",
+    [FakeRerankAPI(model_sha="main"), FakeRerankAPI(reranker=False)],
+    ids=["other-revision", "not-a-reranker"],
+)
+async def test_reranker_mismatch_fails_before_any_api_request(
+    reranker_env: pytest.MonkeyPatch, tei: FakeRerankAPI
+) -> None:
+    api = FakeEmbeddingsAPI()
+    with pytest.raises(ConfigurationError):
+        async with open_container(
+            openai_transport=httpx2.MockTransport(api),
+            reranker_transport=httpx2.MockTransport(tei),
+        ):
+            pass
+    assert api.requests == []
+
+
+async def test_unreachable_reranker_fails_at_startup(
+    reranker_env: pytest.MonkeyPatch,
+) -> None:
+    def refuse(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("refused")
+
+    with pytest.raises(RerankError, match=r"tei\.test"):
+        async with open_container(
+            openai_transport=httpx2.MockTransport(FakeEmbeddingsAPI()),
+            reranker_transport=httpx2.MockTransport(refuse),
+        ):
+            pass

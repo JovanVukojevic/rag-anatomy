@@ -22,3 +22,19 @@ make db-up migrate
 make check        # includes integration tests against a throwaway Postgres
 make test-unit    # fast loop, no Docker
 ```
+
+### Reranking (optional, off by default)
+
+Retrieval can rerank its candidates with
+[bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) served by
+Hugging Face text-embeddings-inference. On a laptop CPU this takes tens of seconds per
+query, so it is meant for offline evaluation, not interactive use.
+
+```sh
+make reranker-up          # first start downloads 2.3 GB of weights
+# set RERANKER_ENABLED=true in .env
+make test-reranker        # tests against the real model
+```
+
+Data leaves the machine only for embeddings: chunk text and queries are sent to OpenAI.
+The reranker runs locally.

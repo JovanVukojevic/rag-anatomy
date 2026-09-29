@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck encodings test test-unit check db-up db-down migrate
+.PHONY: lint format typecheck encodings test test-unit test-reranker check db-up db-down reranker-up reranker-down migrate
 
 export TIKTOKEN_CACHE_DIR ?= $(CURDIR)/.cache/tiktoken
 
@@ -23,6 +23,9 @@ test: encodings
 test-unit: encodings
 	uv run pytest -m "not integration"
 
+test-reranker: encodings
+	uv run pytest -m reranker
+
 check: lint typecheck test
 
 db-up:
@@ -30,6 +33,12 @@ db-up:
 
 db-down:
 	docker compose down
+
+reranker-up:
+	docker compose --profile rerank up -d --wait reranker
+
+reranker-down:
+	docker compose --profile rerank rm -sf reranker
 
 migrate:
 	uv run alembic upgrade head

@@ -1,25 +1,27 @@
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rag_anatomy.domain import RetrievedChunk, StageRank
 from rag_anatomy.ports import Reranker
 from tests.fakes._text import overlap
 
 
+@dataclass(frozen=True, slots=True)
+class RerankCall:
+    query: str
+    texts: list[str]
+
+
 class FakeReranker:
-    async def rerank(
-        self, query: str, candidates: Sequence[RetrievedChunk], k: int
-    ) -> list[RetrievedChunk]:
-        scored = sorted(
-            ((overlap(query, c.chunk.text), c) for c in candidates),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )
-        return [
-            replace(candidate, rerank=StageRank(rank=rank, score=score))
-            for rank, (score, candidate) in enumerate(scored[:k], start=1)
-        ]
+    def __init__(self, failure: Exception | None = None) -> None:
+        self.calls: list[RerankCall] = []
+        self._failure = failure
+
+    async def score(self, query: str, texts: Sequence[str]) -> list[float]:
+        self.calls.append(RerankCall(query=query, texts=list(texts)))
+        if self._failure is not None:
+            raise self._failure
+        return [overlap(query, text) for text in texts]
 
 
 if TYPE_CHECKING:

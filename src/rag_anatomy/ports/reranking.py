@@ -1,12 +1,8 @@
 from collections.abc import Sequence
 from typing import Protocol
 
-from rag_anatomy.domain import RetrievedChunk
-
 
 class Reranker(Protocol):
-    """Rescores candidates against the query and returns the best k, best first."""
+    """Scores each text against the query, in input order; higher is better, within one call."""
 
-    async def rerank(
-        self, query: str, candidates: Sequence[RetrievedChunk], k: int
-    ) -> list[RetrievedChunk]: ...
+    async def score(self, query: str, texts: Sequence[str]) -> list[float]: ...

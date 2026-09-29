@@ -3,7 +3,12 @@ from urllib.parse import unquote, urlsplit
 import pytest
 from pydantic import ValidationError
 
-from rag_anatomy.config import DatabaseSettings, OpenAISettings
+from rag_anatomy.config import (
+    DatabaseSettings,
+    OpenAISettings,
+    RerankerServerSettings,
+    RerankerSettings,
+)
 
 _DATABASE_ENV = {
     "POSTGRES_USER": "rag",
@@ -82,3 +87,38 @@ def test_invalid_embedding_settings_are_rejected(
     monkeypatch.setenv(name, value)
     with pytest.raises(ValidationError):
         OpenAISettings(_env_file=None)
+
+
+def test_reranking_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("ENABLED", "CANDIDATE_POOL", "TIMEOUT"):
+        monkeypatch.delenv(f"RERANKER_{name}", raising=False)
+    settings = RerankerSettings(_env_file=None)
+    assert (settings.enabled, settings.candidate_pool, settings.timeout) == (
+        False,
+        20,
+        210.0,
+    )
+
+
+def test_reranker_server_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RERANKER_HOST", "127.0.0.1")
+    monkeypatch.setenv("RERANKER_PORT", "8080")
+    monkeypatch.setenv("RERANKER_MODEL", "org/model")
+    monkeypatch.setenv("RERANKER_REVISION", "abc")
+    assert RerankerServerSettings(_env_file=None).url == "http://127.0.0.1:8080"
+
+
+@pytest.mark.parametrize("missing", ["HOST", "PORT", "MODEL", "REVISION"])
+def test_missing_reranker_server_variable_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    for name, value in {
+        "HOST": "h",
+        "PORT": "1",
+        "MODEL": "m",
+        "REVISION": "r",
+    }.items():
+        monkeypatch.setenv(f"RERANKER_{name}", value)
+    monkeypatch.delenv(f"RERANKER_{missing}")
+    with pytest.raises(ValidationError):
+        RerankerServerSettings(_env_file=None)

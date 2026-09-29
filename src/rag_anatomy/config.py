@@ -31,3 +31,28 @@ class OpenAISettings(BaseSettings):
     embedding_dimensions: int = Field(1536, gt=0)
     timeout: float = Field(30.0, gt=0)
     max_retries: int = Field(3, ge=0)
+
+
+class RerankerSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="RERANKER_", env_file=".env", extra="ignore"
+    )
+
+    enabled: bool = False
+    candidate_pool: int = Field(20, gt=0)
+    timeout: float = Field(210.0, gt=0)
+
+
+class RerankerServerSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="RERANKER_", env_file=".env", extra="ignore"
+    )
+
+    host: str = Field(min_length=1)
+    port: int
+    model: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
